@@ -9,49 +9,53 @@ logger = logging.getLogger(__name__)
 
 def get_ec2_metadata():
     """
-    Retrieve EC2 instance metadata using boto3 EC2 Instance Metadata Service.
+    Retrieve EC2 instance metadata using IMDSv2.
     Returns region, AZ, instance ID, and instance type.
     """
     try:
-        # Create EC2 client - region will be auto-detected from instance metadata
-        ec2_client = boto3.client('ec2', region_name=None)
-        
-        # Get instance metadata from the EC2 Instance Metadata Service
-        session = boto3.Session()
-        ec2_metadata = session.client('ec2').meta.region_name
-        
-        # Alternative approach: Use the metadata service directly
         import requests
+        
+        # IMDSv2 requires a token first
+        token_url = 'http://169.254.169.254/latest/api/token'
+        token_response = requests.put(
+            token_url,
+            headers={'X-aws-ec2-metadata-token-ttl-seconds': '21600'},
+            timeout=1
+        )
+        
+        if token_response.status_code != 200:
+            logger.error(f"Failed to get IMDSv2 token: {token_response.status_code}")
+            raise Exception("Could not get metadata token")
+        
+        token = token_response.text
+        
+        # Now use the token to get metadata
         metadata_url = 'http://169.254.169.254/latest/dynamic/instance-identity/document'
+        response = requests.get(
+            metadata_url,
+            headers={'X-aws-ec2-metadata-token': token},
+            timeout=1
+        )
         
-        try:
-            response = requests.get(metadata_url, timeout=1)
-            if response.status_code == 200:
-                metadata = response.json()
-                return {
-                    'region': metadata.get('region'),
-                    'availability_zone': metadata.get('availabilityZone'),
-                    'instance_id': metadata.get('instanceId'),
-                    'instance_type': metadata.get('instanceType')
-                }
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Could not reach metadata service: {e}")
-        
-        # Fallback: try to get from boto3 session
-        return {
-            'region': session.region_name or 'unknown',
-            'availability_zone': 'unknown',
-            'instance_id': 'unknown',
-            'instance_type': 'unknown'
-        }
-        
+        if response.status_code == 200:
+            metadata = response.json()
+            return {
+                'region': metadata.get('region', 'unknown'),
+                'availability_zone': metadata.get('availabilityZone', 'unknown'),
+                'instance_id': metadata.get('instanceId', 'unknown'),
+                'instance_type': metadata.get('instanceType', 'unknown')
+            }
+        else:
+            logger.error(f"Metadata service returned status {response.status_code}")
     except Exception as e:
         logger.error(f"Error getting EC2 metadata: {e}")
-        return {
-            'region': 'unknown',
-            'availability_zone': 'unknown',
-            'error': str(e)
-        }
+    
+    return {
+        'region': 'unknown',
+        'availability_zone': 'unknown',
+        'instance_id': 'unknown',
+        'instance_type': 'unknown'
+    }
 
 @app.route('/', methods=['GET'])
 def index():
