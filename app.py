@@ -237,6 +237,28 @@ def upload_image():
         connection.close()
         
         logger.info(f"Stored metadata in RDS: {filename}")
+
+        # Send message to SQS
+        message_body = {
+            'image_name': filename,
+            'file_size': file_size,
+            'file_extension': file_extension,
+            'timestamp': datetime.utcnow().isoformat(),
+            's3_key': s3_key
+        }
+        
+        sqs_client.send_message(
+            QueueUrl=SQS_QUEUE_URL,
+            MessageBody=json.dumps(message_body),
+            MessageAttributes={
+                'Extension': {
+                    'StringValue': file_extension,
+                    'DataType': 'String'
+                }
+            }
+        )
+        
+        logger.info(f"Sent SQS message for: {filename}")
         
         return jsonify({
             'success': True,
@@ -500,6 +522,86 @@ def unsubscribe_email():
     except Exception as e:
         logger.error(f"Unsubscribe error: {e}")
         return jsonify({'error': str(e)}), 500
+
+def process_sqs_messages():
+    """Background job: Extract from SQS and publish to SNS"""
+    try:
+        response = sqs_client.receive_message(
+            QueueUrl=SQS_QUEUE_URL,
+            MaxNumberOfMessages=10,
+            WaitTimeSeconds=5,
+            MessageAttributeNames=['All']
+        )
+        
+        if 'Messages' not in response:
+            return
+        
+        messages = response['Messages']
+        logger.info(f"Processing {len(messages)} messages from SQS")
+        
+        for message in messages:
+            try:
+                body = json.loads(message['Body'])
+                image_name = body['image_name']
+                file_size = body['file_size']
+                extension = body['file_extension']
+                
+                download_url = f"http://3.222.245.226:5000/api/images/download/{image_name}"
+                
+                sns_message = f"""Image Upload Notification
+========================
+
+An image has been uploaded.
+
+Image Details:
+- Name: {image_name}
+- Size: {file_size} bytes ({file_size / 1024:.2f} KB)
+- Extension: {extension}
+- Uploaded: {body['timestamp']}
+
+Download: {download_url}
+
+Thank you!"""
+                
+                sns_client.publish(
+                    TopicArn=SNS_TOPIC_ARN,
+                    Subject=f'Image Upload: {image_name}',
+                    Message=sns_message,
+                    MessageAttributes={
+                        'Extension': {
+                            'DataType': 'String',
+                            'StringValue': extension
+                        }
+                    }
+                )
+                
+                logger.info(f"Published SNS message for: {image_name}")
+                
+                sqs_client.delete_message(
+                    QueueUrl=SQS_QUEUE_URL,
+                    ReceiptHandle=message['ReceiptHandle']
+                )
+                
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
+    
+    except Exception as e:
+        logger.error(f"SQS processing error: {e}")
+
+# Initialize scheduler
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    func=process_sqs_messages,
+    trigger="interval",
+    seconds=30,
+    id="sqs_processor",
+    name="Process SQS messages",
+    replace_existing=True
+)
+
+if not scheduler.running:
+    scheduler.start()
+    logger.info("Background scheduler started")
 
 if __name__ == '__main__':
     # Run on 0.0.0.0 so it's accessible from outside the instance
