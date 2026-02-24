@@ -4,9 +4,19 @@ from botocore.exceptions import ClientError
 import logging
 import pymysql
 import os
-from datetime import datetime
 from io import BytesIO
 import random
+from apscheduler.schedulers.background import BackgroundScheduler
+import json
+from datetime import datetime
+
+# AWS Clients
+sqs_client = boto3.client('sqs', region_name='us-east-1')
+sns_client = boto3.client('sns', region_name='us-east-1')
+
+# Environment variables
+SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL')
+SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN')
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -440,6 +450,55 @@ def list_images():
     
     except Exception as e:
         logger.error(f"List images error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/subscribe', methods=['POST'])
+def subscribe_email():
+    """Subscribe email to image upload notifications"""
+    try:
+        email = request.json.get('email')
+        
+        if not email:
+            return jsonify({'error': 'Email required'}), 400
+        
+        response = sns_client.subscribe(
+            TopicArn=SNS_TOPIC_ARN,
+            Protocol='email',
+            Endpoint=email
+        )
+        
+        subscription_arn = response['SubscriptionArn']
+        logger.info(f"Email subscribed: {email}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Confirmation sent to {email}',
+            'subscription_arn': subscription_arn
+        }), 201
+    
+    except Exception as e:
+        logger.error(f"Subscribe error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/unsubscribe', methods=['POST'])
+def unsubscribe_email():
+    """Unsubscribe email from notifications"""
+    try:
+        subscription_arn = request.json.get('subscription_arn')
+        
+        if not subscription_arn:
+            return jsonify({'error': 'subscription_arn required'}), 400
+        
+        sns_client.unsubscribe(SubscriptionArn=subscription_arn)
+        logger.info(f"Email unsubscribed: {subscription_arn}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Successfully unsubscribed'
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Unsubscribe error: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
