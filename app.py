@@ -522,6 +522,19 @@ def unsubscribe_email():
         logger.error(f"Unsubscribe error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/check-consistency', methods=['GET'])
+def check_consistency():
+    """Trigger Lambda consistency check synchronously"""
+    try:
+        lambda_client = boto3.client('lambda', region_name='us-east-1')
+        response = lambda_client.invoke(FunctionName='flask-app-DataConsistencyFunction', InvocationType='RequestResponse', Payload=json.dumps({'source': 'web-app', 'httpMethod': 'GET'}))
+        result = json.loads(response['Payload'].read())
+        logger.info(f"Consistency check result: {json.dumps(result)}")
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Consistency check error: {e}")
+        return jsonify({'error': str(e)}), 500
+        
 if __name__ == '__main__':
     # Run on 0.0.0.0 so it's accessible from outside the instance
     app.run(host='0.0.0.0', port=5000, debug=False)
