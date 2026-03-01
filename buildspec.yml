@@ -1,0 +1,31 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      - echo "Installing AWS SAM CLI..."
+      - pip install aws-sam-cli
+      - echo "Installing dependencies..."
+      - pip install -r src/requirements.txt -t src/
+  
+  build:
+    commands:
+      - echo "Building SAM application..."
+      - sam build
+      - echo "Packaging SAM application..."
+      - sam package --output-template-file packaged.yaml --s3-bucket $ARTIFACT_BUCKET --region $AWS_REGION
+  
+  post_build:
+    commands:
+      - echo "Build completed on `date`"
+
+artifacts:
+  files:
+    - packaged.yaml
+  name: SAMBuildArtifact
+
+cache:
+  paths:
+    - '/root/.cache/pip/**/*'

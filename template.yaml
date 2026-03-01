@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Image upload notification Lambda function
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: python3.11
+    Environment:
+      Variables:
+        SNS_TOPIC_ARN: !Ref UploadsNotificationTopic
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: prod
+    Description: Environment name
+  ProjectName:
+    Type: String
+    Default: flask-app
+    Description: Project name
+
+Resources:
+  UploadsNotificationFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SNSPublishPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !GetAtt UploadsNotificationTopic.TopicArn
+        - PolicyName: SQSReceivePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt UploadsNotificationQueue.Arn
+
+  UploadsNotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-UploadsNotificationQueue'
+      VisibilityTimeout: 30
+      MessageRetentionPeriod: 1209600
+
+  UploadsNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-UploadsNotificationTopic'
+
+  UploadsNotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-UploadsNotificationFunction'
+      CodeUri: src/
+      Handler: app.lambda_handler
+      Role: !GetAtt UploadsNotificationFunctionRole.Arn
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt UploadsNotificationQueue.Arn
+            BatchSize: 10
+            BatchWindow: 5
+      DeploymentPreference:
+        Type: Linear10Percent5Minutes
+        Alarms:
+          - !Ref LambdaErrorAlarm
+        TriggerConfigurations:
+          - DeploymentEventTypes:
+              - DEPLOYMENT_SUCCESS
+              - DEPLOYMENT_FAILURE
+
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-lambda-errors'
+      AlarmDescription: Lambda function error rate
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref UploadsNotificationFunction
+
+Outputs:
+  UploadsNotificationFunctionArn:
+    Description: ARN of the Lambda function
+    Value: !GetAtt UploadsNotificationFunction.Arn
+  
+  UploadsNotificationQueueUrl:
+    Description: URL of the SQS queue
+    Value: !Ref UploadsNotificationQueue
+  
+  UploadsNotificationTopicArn:
+    Description: ARN of the SNS topic
+    Value: !GetAtt UploadsNotificationTopic.TopicArn
