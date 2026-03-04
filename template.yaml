@@ -79,7 +79,6 @@ Resources:
           Properties:
             Queue: !GetAtt UploadsNotificationQueue.Arn
             BatchSize: 10
-            BatchWindow: 5
       DeploymentPreference:
         Type: Linear10Percent5Minutes
         Alarms:
