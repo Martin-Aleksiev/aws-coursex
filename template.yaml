@@ -81,7 +81,7 @@ Resources:
             Queue: !GetAtt UploadsNotificationQueue.Arn
             BatchSize: 10
       DeploymentPreference:
-        Type: Linear10Percent5Minutes
+        Type: Canary10Percent5Minutes
         Alarms:
           - !Ref LambdaErrorAlarm
 
