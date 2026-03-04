@@ -84,10 +84,6 @@ Resources:
         Type: Linear10Percent5Minutes
         Alarms:
           - !Ref LambdaErrorAlarm
-        TriggerConfigurations:
-          - DeploymentEventTypes:
-              - DEPLOYMENT_SUCCESS
-              - DEPLOYMENT_FAILURE
 
   LambdaErrorAlarm:
     Type: AWS::CloudWatch::Alarm
