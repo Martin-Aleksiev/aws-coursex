@@ -73,6 +73,7 @@ Resources:
       CodeUri: src/
       Handler: app.lambda_handler
       Role: !GetAtt UploadsNotificationFunctionRole.Arn
+      AutoPublishAlias: live
       Events:
         SQSEvent:
           Type: SQS
